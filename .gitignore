@@ -1,2 +1,21 @@
+# OS
 .DS_Store
 **/.DS_Store
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment & IDE
+.env
+.env.*
+.idea/

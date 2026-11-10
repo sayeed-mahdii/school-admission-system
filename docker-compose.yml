@@ -8,6 +8,11 @@ services:
       POSTGRES_DB: admission_system
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d admission_system"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: ./backend
@@ -18,13 +23,14 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=admission_system;Username=admin;Password=admin"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
     restart: always
     ports:
-      - "5173:80"
+      - "3000:80"
     depends_on:
       - backend
 

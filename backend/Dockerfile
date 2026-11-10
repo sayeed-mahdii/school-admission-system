@@ -1,9 +1,11 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copy project file and restore dependencies (optimizes Docker caching)
+# Copy solution and project files and restore dependencies
+COPY AdmissionSystem.slnx ./
 COPY AdmissionSystem.Api/AdmissionSystem.Api.csproj AdmissionSystem.Api/
-RUN dotnet restore AdmissionSystem.Api/AdmissionSystem.Api.csproj
+COPY AdmissionSystem.Tests/AdmissionSystem.Tests.csproj AdmissionSystem.Tests/
+RUN dotnet restore AdmissionSystem.slnx
 
 # Copy the rest of the source files and publish
 COPY . .
@@ -13,5 +15,4 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
 EXPOSE 8080
-ENV ASPNETCORE_URLS=http://+:8080
 ENTRYPOINT ["dotnet", "AdmissionSystem.Api.dll"]
