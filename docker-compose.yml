@@ -27,6 +27,19 @@ services:
       db:
         condition: service_healthy
 
+  tests:
+    build:
+      context: ./backend
+      target: test
+    profiles: ["test"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "Host=db;Port=5432;Database=admission_system_test;Username=admin;Password=admin;Maximum Pool Size=30;Timeout=30;GSS Encryption Mode=Disable"
+      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     restart: always
