@@ -175,4 +175,94 @@ public sealed class HoldsController(
 
         return Ok(response);
     }
+
+    [HttpPost("/holds/{holdId}/confirm")]
+    public async Task<IActionResult> Confirm(string holdId, CancellationToken cancellationToken)
+    {
+        if (!StudentHeader.TryGetStudentId(Request, out var studentId, out var headerError))
+        {
+            return headerError!;
+        }
+
+        if (!RouteId.TryParse(holdId, out var parsedHoldId))
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+
+        // Untracked pre-check so EF Core's identity map does not cache pre-lock state.
+        var untrackedHold = await db.Holds
+            .AsNoTracking()
+            .Where(h => h.Id == parsedHoldId)
+            .Select(h => new { h.Id, h.ClassId, h.StudentId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (untrackedHold is null)
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        if (!string.Equals(untrackedHold.StudentId, studentId, StringComparison.Ordinal))
+        {
+            return ApiProblem.Forbidden("You can only confirm your own application.");
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var lockedClasses = await db.Classes
+            .FromSqlInterpolated($"SELECT * FROM \"Classes\" WHERE \"Id\" = {untrackedHold.ClassId} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+        if (lockedClasses.Count == 0)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return ApiProblem.NotFound("Class not found.");
+        }
+
+        // Load tracked entity AFTER acquiring the class row lock so state is fresh from Postgres.
+        var hold = await db.Holds.SingleOrDefaultAsync(h => h.Id == parsedHoldId, cancellationToken);
+        if (hold is null)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        if (hold.Status == HoldStatus.Confirmed)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return Ok(new HoldConfirmedResponse(hold.Id, HoldStatus.Confirmed));
+        }
+
+        if (hold.Status == HoldStatus.Held && hold.ExpiresAt <= now)
+        {
+            hold.Status = HoldStatus.Expired;
+            await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldExpired,
+                "This application has expired and can no longer be confirmed.");
+        }
+
+        if (hold.Status == HoldStatus.Expired)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldExpired,
+                "This application has expired and can no longer be confirmed.");
+        }
+
+        if (hold.Status == HoldStatus.Cancelled)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldNotActive,
+                "This application was cancelled and cannot be confirmed.");
+        }
+
+        hold.Status = HoldStatus.Confirmed;
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return Ok(new HoldConfirmedResponse(hold.Id, HoldStatus.Confirmed));
+    }
 }
