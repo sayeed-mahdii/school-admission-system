@@ -119,3 +119,4 @@ public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider
         return Ok(response);
     }
 }
+

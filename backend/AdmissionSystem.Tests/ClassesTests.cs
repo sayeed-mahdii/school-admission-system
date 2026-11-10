@@ -266,3 +266,4 @@ public sealed class ClassesTests(AdmissionApiFactory factory) : IntegrationTestB
         Assert.Equal("NOT_FOUND", doc.RootElement.GetProperty("code").GetString());
     }
 }
+
