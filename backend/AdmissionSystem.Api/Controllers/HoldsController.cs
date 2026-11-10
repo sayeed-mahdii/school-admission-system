@@ -265,4 +265,92 @@ public sealed class HoldsController(
 
         return Ok(new HoldConfirmedResponse(hold.Id, HoldStatus.Confirmed));
     }
+
+    [HttpDelete("/holds/{holdId}")]
+    public async Task<IActionResult> Cancel(string holdId, CancellationToken cancellationToken)
+    {
+        if (!StudentHeader.TryGetStudentId(Request, out var studentId, out var headerError))
+        {
+            return headerError!;
+        }
+
+        if (!RouteId.TryParse(holdId, out var parsedHoldId))
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+
+        var untrackedHold = await db.Holds
+            .AsNoTracking()
+            .Where(h => h.Id == parsedHoldId)
+            .Select(h => new { h.Id, h.ClassId, h.StudentId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (untrackedHold is null)
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        if (!string.Equals(untrackedHold.StudentId, studentId, StringComparison.Ordinal))
+        {
+            return ApiProblem.Forbidden("You can only cancel your own application.");
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var lockedClasses = await db.Classes
+            .FromSqlInterpolated($"SELECT * FROM \"Classes\" WHERE \"Id\" = {untrackedHold.ClassId} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+        if (lockedClasses.Count == 0)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return ApiProblem.NotFound("Class not found.");
+        }
+
+        var hold = await db.Holds.SingleOrDefaultAsync(h => h.Id == parsedHoldId, cancellationToken);
+        if (hold is null)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        if (hold.Status == HoldStatus.Confirmed)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldNotActive,
+                "A confirmed admission cannot be cancelled.");
+        }
+
+        if (hold.Status == HoldStatus.Held && hold.ExpiresAt <= now)
+        {
+            hold.Status = HoldStatus.Expired;
+            await db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldExpired,
+                "This application has already expired and cannot be cancelled.");
+        }
+
+        if (hold.Status == HoldStatus.Expired)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return ApiProblem.Conflict(
+                ErrorCodes.HoldExpired,
+                "This application has already expired and cannot be cancelled.");
+        }
+
+        if (hold.Status == HoldStatus.Cancelled)
+        {
+            await tx.CommitAsync(cancellationToken);
+            return NoContent();
+        }
+
+        hold.Status = HoldStatus.Cancelled;
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+
+        return NoContent();
+    }
 }
