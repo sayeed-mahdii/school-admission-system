@@ -100,4 +100,79 @@ public sealed class HoldsController(
 
         return StatusCode(StatusCodes.Status201Created, response);
     }
+
+    [HttpGet("/holds/{holdId}")]
+    public async Task<IActionResult> GetById(string holdId, CancellationToken cancellationToken)
+    {
+        if (!RouteId.TryParse(holdId, out var parsedHoldId))
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+
+        var hold = await db.Holds
+            .AsNoTracking()
+            .Where(h => h.Id == parsedHoldId)
+            .Select(h => new
+            {
+                h.Id,
+                h.ClassId,
+                h.Status,
+                h.ExpiresAt,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (hold is null)
+        {
+            return ApiProblem.NotFound("Hold not found.");
+        }
+
+        var response = new HoldResponse(
+            hold.Id,
+            hold.ClassId,
+            HoldStatus.Effective(hold.Status, hold.ExpiresAt, now),
+            hold.ExpiresAt.UtcDateTime,
+            now.UtcDateTime);
+
+        return Ok(response);
+    }
+
+    [HttpGet("/me/holds")]
+    public async Task<IActionResult> ListMyHolds(CancellationToken cancellationToken)
+    {
+        if (!StudentHeader.TryGetStudentId(Request, out var studentId, out var headerError))
+        {
+            return headerError!;
+        }
+
+        var now = timeProvider.GetUtcNow().ToUniversalTime();
+
+        var rows = await db.Holds
+            .AsNoTracking()
+            .Where(h => h.StudentId == studentId)
+            .OrderByDescending(h => h.CreatedAt)
+            .ThenByDescending(h => h.Id)
+            .Select(h => new
+            {
+                h.Id,
+                h.ClassId,
+                ClassName = h.Class != null ? h.Class.Name : string.Empty,
+                h.Status,
+                h.ExpiresAt,
+            })
+            .ToListAsync(cancellationToken);
+
+        var response = rows
+            .Select(h => new MyHoldResponse(
+                h.Id,
+                h.ClassId,
+                h.ClassName,
+                HoldStatus.Effective(h.Status, h.ExpiresAt, now),
+                h.ExpiresAt.UtcDateTime,
+                now.UtcDateTime))
+            .ToList();
+
+        return Ok(response);
+    }
 }
