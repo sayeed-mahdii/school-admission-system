@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { ApiError, getMyHolds, isValidStudentId } from './api';
+import { getMyHolds, isValidStudentId } from './api';
 import { ApplicationCard } from './components/ApplicationCard';
 import { ClassListCard } from './components/ClassListCard';
 import { CreateClassCard } from './components/CreateClassCard';
+import { MyApplicationsCard } from './components/MyApplicationsCard';
 import { StudentIdBar } from './components/StudentIdBar';
 import { resolveEffectiveHoldId } from './statusUtils';
 import {
@@ -30,13 +31,6 @@ function App() {
     refetchInterval: 3000,
   });
 
-  const myHoldsNetworkError =
-    myHoldsQuery.error instanceof ApiError && myHoldsQuery.error.isNetworkError
-      ? myHoldsQuery.error.message
-      : null;
-
-  const displayedGlobalError = globalError ?? myHoldsNetworkError;
-
   const effectiveHoldId = validStudent
     ? resolveEffectiveHoldId(selectedHoldId, myHoldsQuery.data)
     : null;
@@ -46,7 +40,7 @@ function App() {
   }, [studentId]);
 
   useEffect(() => {
-    if (validStudent && effectiveHoldId) {
+    if (validStudent) {
       saveStoredSelectedHoldId(studentId, effectiveHoldId);
     }
   }, [validStudent, studentId, effectiveHoldId]);
@@ -80,13 +74,13 @@ function App() {
       </header>
 
       <main className="container">
-        {displayedGlobalError && (
+        {globalError && (
           <div
             className="alert alert-danger alert-dismissible fade show shadow-sm mb-4"
             role="alert"
           >
             <strong>ত্রুটি: </strong>
-            <span>{displayedGlobalError}</span>
+            <span>{globalError}</span>
             <button
               type="button"
               className="btn-close"
@@ -129,14 +123,19 @@ function App() {
 
           {/* 4. আমার আবেদন */}
           <div className="col-12 col-lg-6">
-            <section className="card shadow-sm h-100">
-              <div className="card-header bg-white py-3">
-                <h2 className="h5 mb-0 fw-bold">আমার আবেদন</h2>
-              </div>
-              <div className="card-body text-muted">
-                এই শিক্ষার্থীর সকল আবেদনের তালিকা এবং বর্তমান অবস্থা।
-              </div>
-            </section>
+            <MyApplicationsCard
+              studentId={studentId}
+              holds={myHoldsQuery.data ?? []}
+              isLoading={myHoldsQuery.isLoading}
+              isSuccess={myHoldsQuery.isSuccess}
+              error={
+                myHoldsQuery.error instanceof Error ? myHoldsQuery.error : null
+              }
+              dataUpdatedAt={myHoldsQuery.dataUpdatedAt}
+              selectedHoldId={effectiveHoldId}
+              onSelectHold={(holdId) => handleSelectHold(holdId)}
+              onNetworkError={setGlobalError}
+            />
           </div>
         </div>
       </main>
