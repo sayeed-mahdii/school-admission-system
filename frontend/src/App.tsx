@@ -1,34 +1,35 @@
 import { useEffect, useState } from 'react';
 import { isValidStudentId } from './api';
+import { ClassListCard } from './components/ClassListCard';
 import { CreateClassCard } from './components/CreateClassCard';
 import { StudentIdBar } from './components/StudentIdBar';
-
-const STUDENT_ID_STORAGE_KEY = 'admission_student_id';
-
-function loadInitialStudentId(): string {
-  try {
-    return localStorage.getItem(STUDENT_ID_STORAGE_KEY)?.trim() ?? '';
-  } catch {
-    return '';
-  }
-}
+import {
+  loadStoredSelectedHoldId,
+  loadStoredStudentId,
+  saveStoredSelectedHoldId,
+  saveStoredStudentId,
+} from './storage';
 
 function App() {
-  const [studentId, setStudentId] = useState<string>(loadInitialStudentId);
+  const [studentId, setStudentId] = useState<string>(loadStoredStudentId);
+  const [selectedHoldId, setSelectedHoldId] = useState<string | null>(() =>
+    loadStoredSelectedHoldId(loadStoredStudentId()),
+  );
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const trimmed = studentId.trim();
-      if (trimmed) {
-        localStorage.setItem(STUDENT_ID_STORAGE_KEY, trimmed);
-      } else {
-        localStorage.removeItem(STUDENT_ID_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore localStorage quota or privacy errors
-    }
+    saveStoredStudentId(studentId);
   }, [studentId]);
+
+  const handleStudentIdChange = (nextStudentId: string) => {
+    setStudentId(nextStudentId);
+    setSelectedHoldId(loadStoredSelectedHoldId(nextStudentId));
+  };
+
+  const handleSelectHold = (holdId: string | null) => {
+    setSelectedHoldId(holdId);
+    saveStoredSelectedHoldId(studentId, holdId);
+  };
 
   const validStudent = isValidStudentId(studentId);
 
@@ -67,7 +68,10 @@ function App() {
           </div>
         )}
 
-        <StudentIdBar studentId={studentId} onChange={setStudentId} />
+        <StudentIdBar
+          studentId={studentId}
+          onChange={handleStudentIdChange}
+        />
 
         <div className="row g-4">
           {/* 1. Class তৈরি (school admin) */}
@@ -77,14 +81,11 @@ function App() {
 
           {/* 2. Class তালিকা */}
           <div className="col-12 col-lg-7">
-            <section className="card shadow-sm h-100">
-              <div className="card-header bg-white py-3">
-                <h2 className="h5 mb-0 fw-bold">Class তালিকা</h2>
-              </div>
-              <div className="card-body text-muted">
-                সকল class-এর মোট, Hold-এ থাকা, নিশ্চিত ও খালি seat-এর তালিকা।
-              </div>
-            </section>
+            <ClassListCard
+              studentId={studentId}
+              onHoldCreated={(hold) => handleSelectHold(hold.holdId)}
+              onNetworkError={setGlobalError}
+            />
           </div>
 
           {/* 3. আবেদন */}
@@ -94,7 +95,9 @@ function App() {
                 <h2 className="h5 mb-0 fw-bold">আবেদন</h2>
               </div>
               <div className="card-body text-muted">
-                নির্বাচিত আবেদনের বর্তমান অবস্থা, সময়সীমা, ভর্তি ফি জমা এবং বাতিল।
+                {selectedHoldId
+                  ? `নির্বাচিত আবেদন ID: ${selectedHoldId}`
+                  : 'নির্বাচিত আবেদনের বর্তমান অবস্থা, সময়সীমা, ভর্তি ফি জমা এবং বাতিল।'}
               </div>
             </section>
           </div>
