@@ -20,6 +20,14 @@ function App() {
     loadStoredSelectedHoldId(loadStoredStudentId()),
   );
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const validStudent = isValidStudentId(studentId);
   const trimmedStudentId = studentId.trim();
@@ -117,6 +125,7 @@ function App() {
               holdId={effectiveHoldId}
               myHolds={myHoldsQuery.data ?? []}
               myHoldsDataUpdatedAt={myHoldsQuery.dataUpdatedAt}
+              nowMs={nowMs}
               onNetworkError={setGlobalError}
             />
           </div>
@@ -132,6 +141,7 @@ function App() {
                 myHoldsQuery.error instanceof Error ? myHoldsQuery.error : null
               }
               dataUpdatedAt={myHoldsQuery.dataUpdatedAt}
+              nowMs={nowMs}
               selectedHoldId={effectiveHoldId}
               onSelectHold={(holdId) => handleSelectHold(holdId)}
               onNetworkError={setGlobalError}

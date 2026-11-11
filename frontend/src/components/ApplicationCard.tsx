@@ -22,6 +22,7 @@ interface ApplicationCardProps {
   holdId: string | null;
   myHolds: MyHoldResponse[];
   myHoldsDataUpdatedAt: number;
+  nowMs: number;
   onNetworkError?: (message: string | null) => void;
 }
 
@@ -30,11 +31,11 @@ export function ApplicationCard({
   holdId,
   myHolds,
   myHoldsDataUpdatedAt,
+  nowMs,
   onNetworkError,
 }: ApplicationCardProps) {
   const queryClient = useQueryClient();
   const validStudent = isValidStudentId(studentId);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [feedback, setFeedback] = useState<{
     holdId: string;
     type: 'success' | 'danger';
@@ -65,35 +66,24 @@ export function ApplicationCard({
   const activeHold = holdQuery.data ?? matchingMyHold ?? null;
   const offsetMs = computeClockOffsetMs(
     holdQuery.data?.serverTime ?? matchingMyHold?.serverTime,
-    holdQuery.dataUpdatedAt || myHoldsDataUpdatedAt,
+    holdQuery.data?.serverTime ? holdQuery.dataUpdatedAt : myHoldsDataUpdatedAt,
   );
 
   useEffect(() => {
     if (!activeHold || activeHold.status !== HOLD_STATUS.HELD) {
-      return undefined;
+      return;
     }
 
-    const timer = window.setInterval(() => {
-      const currentNow = Date.now();
-      setNowMs(currentNow);
-
-      const rem = computeRemainingMs(
-        activeHold.expiresAt,
-        currentNow,
-        offsetMs,
-      );
-      if (rem <= 0 && expiredNotifiedRef.current !== activeHold.holdId) {
-        expiredNotifiedRef.current = activeHold.holdId;
-        void Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['classes'] }),
-          queryClient.invalidateQueries({ queryKey: ['my-holds'] }),
-          queryClient.invalidateQueries({ queryKey: ['hold'] }),
-        ]);
-      }
-    }, 250);
-
-    return () => window.clearInterval(timer);
-  }, [activeHold, offsetMs, queryClient]);
+    const rem = computeRemainingMs(activeHold.expiresAt, nowMs, offsetMs);
+    if (rem <= 0 && expiredNotifiedRef.current !== activeHold.holdId) {
+      expiredNotifiedRef.current = activeHold.holdId;
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['classes'] }),
+        queryClient.invalidateQueries({ queryKey: ['my-holds'] }),
+        queryClient.invalidateQueries({ queryKey: ['hold'] }),
+      ]);
+    }
+  }, [activeHold, nowMs, offsetMs, queryClient]);
 
   const confirmMutation = useMutation({
     mutationFn: (targetHoldId: string) =>
@@ -240,7 +230,17 @@ export function ApplicationCard({
               <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
                 <div>
                   <div className="text-muted small">নির্বাচিত Class / Shift</div>
-                  <div className="fw-bold fs-5">{classNameLabel}</div>
+                  <div className="fw-bold fs-5 d-flex align-items-center gap-2">
+                    <span>{classNameLabel}</span>
+                    {activeHold?.classId && (
+                      <span
+                        className="badge bg-secondary-subtle text-secondary-emphasis font-monospace small"
+                        title={`Class ID: ${activeHold.classId}`}
+                      >
+                        #{activeHold.classId.slice(0, 4)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <span
                   className={`badge fs-6 ${getStatusBadgeClass(displayStatus)}`}
@@ -257,11 +257,13 @@ export function ApplicationCard({
                 <div className="col-12 col-sm-6">
                   <span className="text-muted">মেয়াদ শেষের সময়: </span>
                   <span className="fw-medium">
-                    {new Date(activeHold.expiresAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                    })}
+                    {displayStatus === HOLD_STATUS.HELD
+                      ? new Date(activeHold.expiresAt).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        })
+                      : '—'}
                   </span>
                 </div>
               </div>

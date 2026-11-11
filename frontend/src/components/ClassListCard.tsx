@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ApiError, createHold, getClasses, isValidStudentId } from '../api';
 import { saveStoredSelectedHoldId } from '../storage';
 import type {
@@ -26,6 +26,7 @@ export function ClassListCard({
     message: string;
   } | null>(null);
   const [applyingClassId, setApplyingClassId] = useState<string | null>(null);
+  const isSubmittingRef = useRef(false);
 
   const classesQuery = useQuery({
     queryKey: ['classes'],
@@ -46,11 +47,13 @@ export function ClassListCard({
 
   const applyMutation = useMutation({
     mutationFn: (classId: string) => {
-      setApplyingClassId(classId);
       return createHold(classId, studentId.trim());
     },
-    onSuccess: async (createdHold) => {
+    onSettled: () => {
+      isSubmittingRef.current = false;
       setApplyingClassId(null);
+    },
+    onSuccess: async (createdHold) => {
       const trimmedStudent = studentId.trim();
       const matchedClass = (classesQuery.data ?? []).find(
         (c) => c.id === createdHold.classId,
@@ -100,7 +103,6 @@ export function ClassListCard({
       ]);
     },
     onError: async (err) => {
-      setApplyingClassId(null);
       if (err instanceof ApiError && err.isNetworkError) {
         onNetworkError?.(err.message);
       }
@@ -119,6 +121,10 @@ export function ClassListCard({
   });
 
   const classes = classesQuery.data ?? [];
+  const nameCounts = classes.reduce<Record<string, number>>((acc, c) => {
+    acc[c.name] = (acc[c.name] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <section className="card shadow-sm h-100">
@@ -192,10 +198,21 @@ export function ClassListCard({
                     !validStudent ||
                     cls.availableSeats === 0 ||
                     applyMutation.isPending;
+                  const isDuplicateName = (nameCounts[cls.name] ?? 0) > 1;
 
                   return (
                     <tr key={cls.id}>
-                      <td className="fw-semibold">{cls.name}</td>
+                      <td className="fw-semibold">
+                        <span>{cls.name}</span>
+                        {isDuplicateName && (
+                          <span
+                            className="badge bg-light text-secondary border font-monospace ms-2 small"
+                            title={`Class ID: ${cls.id}`}
+                          >
+                            #{cls.id.slice(0, 4)}
+                          </span>
+                        )}
+                      </td>
                       <td className="text-center">{cls.totalSeats}</td>
                       <td className="text-center">
                         <span className="badge bg-warning-subtle text-warning-emphasis">
@@ -224,6 +241,9 @@ export function ClassListCard({
                           className="btn btn-sm btn-primary"
                           disabled={disableApply}
                           onClick={() => {
+                            if (isSubmittingRef.current || applyMutation.isPending) return;
+                            isSubmittingRef.current = true;
+                            setApplyingClassId(cls.id);
                             setApplyFeedback(null);
                             applyMutation.mutate(cls.id);
                           }}

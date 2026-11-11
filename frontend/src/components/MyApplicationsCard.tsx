@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { ApiError, isValidStudentId } from '../api';
 import {
   computeClockOffsetMs,
@@ -17,6 +17,7 @@ interface MyApplicationsCardProps {
   isSuccess: boolean;
   error: Error | null;
   dataUpdatedAt: number;
+  nowMs: number;
   selectedHoldId: string | null;
   onSelectHold: (holdId: string) => void;
   onNetworkError?: (message: string | null) => void;
@@ -29,12 +30,12 @@ export function MyApplicationsCard({
   isSuccess,
   error,
   dataUpdatedAt,
+  nowMs,
   selectedHoldId,
   onSelectHold,
   onNetworkError,
 }: MyApplicationsCardProps) {
   const validStudent = isValidStudentId(studentId);
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
     if (isSuccess) {
@@ -43,16 +44,6 @@ export function MyApplicationsCard({
       onNetworkError?.(error.message);
     }
   }, [isSuccess, error, onNetworkError]);
-
-  const hasHeldHold = holds.some((h) => h.status === HOLD_STATUS.HELD);
-
-  useEffect(() => {
-    if (!hasHeldHold) return undefined;
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [hasHeldHold]);
 
   return (
     <section className="card shadow-sm h-100">
@@ -133,7 +124,15 @@ export function MyApplicationsCard({
                       }}
                     >
                       <td>
-                        <div className="fw-semibold">{hold.className}</div>
+                        <div className="fw-semibold d-flex align-items-center gap-2">
+                          <span>{hold.className}</span>
+                          <span
+                            className="badge bg-light text-secondary border font-monospace small"
+                            title={`Class ID: ${hold.classId}`}
+                          >
+                            #{hold.classId.slice(0, 4)}
+                          </span>
+                        </div>
                         <small className="text-muted font-monospace">
                           {hold.holdId.slice(0, 8)}...
                         </small>
@@ -152,11 +151,13 @@ export function MyApplicationsCard({
                       </td>
                       <td className="text-end small">
                         <div>
-                          {new Date(hold.expiresAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit',
-                          })}
+                          {displayStatus === HOLD_STATUS.HELD
+                            ? new Date(hold.expiresAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })
+                            : '—'}
                         </div>
                         <span className="text-primary small">
                           {isSelected ? 'নির্বাচিত' : 'দেখুন →'}
