@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { ApiError, createHold, getClasses, isValidStudentId } from '../api';
 import { saveStoredSelectedHoldId } from '../storage';
-import type { HoldCreatedResponse } from '../types';
+import type {
+  HoldCreatedResponse,
+  HoldResponse,
+  MyHoldResponse,
+} from '../types';
 
 interface ClassListCardProps {
   studentId: string;
@@ -47,6 +51,40 @@ export function ClassListCard({
     },
     onSuccess: async (createdHold) => {
       setApplyingClassId(null);
+      const trimmedStudent = studentId.trim();
+      const matchedClass = (classesQuery.data ?? []).find(
+        (c) => c.id === createdHold.classId,
+      );
+
+      // Seed caches synchronously so the আবেদন card immediately renders the new
+      // hold without flashing an older application while /me/holds refetches.
+      const holdEntry: HoldResponse = {
+        holdId: createdHold.holdId,
+        classId: createdHold.classId,
+        status: createdHold.status,
+        expiresAt: createdHold.expiresAt,
+        serverTime: createdHold.serverTime,
+      };
+      queryClient.setQueryData(['hold', createdHold.holdId], holdEntry);
+
+      const myHoldEntry: MyHoldResponse = {
+        holdId: createdHold.holdId,
+        classId: createdHold.classId,
+        className: matchedClass?.name ?? createdHold.classId,
+        status: createdHold.status,
+        expiresAt: createdHold.expiresAt,
+        serverTime: createdHold.serverTime,
+      };
+      queryClient.setQueryData<MyHoldResponse[]>(
+        ['my-holds', trimmedStudent],
+        (prev) => {
+          const rest = (prev ?? []).filter(
+            (h) => h.holdId !== createdHold.holdId,
+          );
+          return [myHoldEntry, ...rest];
+        },
+      );
+
       saveStoredSelectedHoldId(studentId, createdHold.holdId);
       onHoldCreated(createdHold);
       onNetworkError?.(null);

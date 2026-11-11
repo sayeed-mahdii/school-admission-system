@@ -11,6 +11,12 @@ namespace AdmissionSystem.Api.Controllers;
 [Route("classes")]
 public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider) : ControllerBase
 {
+    private DateTimeOffset UtcNow()
+    {
+        var t = timeProvider.GetUtcNow();
+        return new DateTimeOffset(t.UtcTicks - t.UtcTicks % TimeSpan.TicksPerMillisecond, TimeSpan.Zero);
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create(
         [FromBody] CreateClassRequest? request,
@@ -32,7 +38,7 @@ public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider
             return ApiProblem.BadRequest("totalSeats must be at least 1.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var now = UtcNow();
         var entity = new ClassEntity
         {
             Id = Guid.NewGuid(),
@@ -51,7 +57,7 @@ public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
     {
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var now = UtcNow();
 
         var rows = await db.Classes
             .AsNoTracking()
@@ -88,7 +94,7 @@ public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider
             return ApiProblem.NotFound("Class not found.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var now = UtcNow();
 
         var row = await db.Classes
             .AsNoTracking()
@@ -119,4 +125,3 @@ public sealed class ClassesController(AppDbContext db, TimeProvider timeProvider
         return Ok(response);
     }
 }
-

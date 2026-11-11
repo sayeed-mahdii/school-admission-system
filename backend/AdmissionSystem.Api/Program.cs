@@ -23,7 +23,7 @@ builder.Services.AddDbContext<AppDbContext>((services, options) =>
 // CORS: the browser UI runs on a different origin (localhost:3000).
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .AllowAnyOrigin()
-    .WithHeaders("Content-Type", "Accept", "X-Student-Id")
+    .AllowAnyHeader()
     .WithMethods("GET", "POST", "DELETE", "OPTIONS")));
 
 // Errors: every error body is ProblemDetails JSON with `code` and `message`.
@@ -57,6 +57,7 @@ var app = builder.Build();
 
 await DatabaseMigrator.MigrateWithRetryAsync(app.Services);
 
+app.UseCors();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
@@ -65,12 +66,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseCors();
-
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapControllers();
 
 app.Run();
 
 public partial class Program { }
-

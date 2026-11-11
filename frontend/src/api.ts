@@ -12,8 +12,11 @@ import type {
 
 export const STUDENT_ID_REGEX = /^\d{17}$/;
 
+export const normalizeStudentId = (v: string): string =>
+  v.trim().replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+
 export function isValidStudentId(value: string): boolean {
-  return STUDENT_ID_REGEX.test(value.trim());
+  return STUDENT_ID_REGEX.test(normalizeStudentId(value));
 }
 
 export class ApiError extends Error {
@@ -123,6 +126,7 @@ async function apiRequest<T>(
       headers,
       body:
         options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new ApiError(
@@ -172,6 +176,14 @@ async function apiRequest<T>(
       friendlyMessage,
       detail,
       false,
+    );
+  }
+
+  if (parsed === undefined) {
+    throw new ApiError(
+      response.status,
+      'INVALID_RESPONSE',
+      'সার্ভার থেকে অপ্রত্যাশিত ফরম্যাটে উত্তর এসেছে (Invalid response format from server).',
     );
   }
 

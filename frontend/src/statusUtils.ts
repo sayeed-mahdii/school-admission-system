@@ -74,8 +74,11 @@ export function resolveEffectiveHoldId(
   selectedHoldId: string | null,
   myHolds: MyHoldResponse[] | undefined,
 ): string | null {
-  if (!myHolds || myHolds.length === 0) {
+  if (myHolds === undefined) {
     return selectedHoldId;
+  }
+  if (myHolds.length === 0) {
+    return null;
   }
   if (selectedHoldId && myHolds.some((h) => h.holdId === selectedHoldId)) {
     return selectedHoldId;

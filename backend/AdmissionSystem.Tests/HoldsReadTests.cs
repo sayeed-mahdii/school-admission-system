@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AdmissionSystem.Api.Contracts;
 using AdmissionSystem.Api.Data;
 using AdmissionSystem.Api.Domain;
@@ -31,6 +32,42 @@ public sealed class HoldsReadTests(AdmissionApiFactory factory) : IntegrationTes
         var hold = await response.Content.ReadFromJsonAsync<HoldCreatedResponse>();
         Assert.NotNull(hold);
         return hold;
+    }
+
+    [Fact]
+    public async Task ExpiresAt_WithSubMillisecondClockTicks_IsIdenticalAcrossPostAndGets()
+    {
+        var createdClass = await CreateClassAsync("Class 6 - Morning Shift", 5);
+
+        // Advance clock by 123.4567 ms (1,234,567 ticks = sub-microsecond and sub-millisecond ticks)
+        Clock.Advance(TimeSpan.FromTicks(1_234_567));
+
+        using var applyReq = new HttpRequestMessage(HttpMethod.Post, $"/classes/{createdClass.Id}/holds");
+        applyReq.Headers.Add(StudentHeader.HeaderName, "20152691234567890");
+        var applyRes = await Client.SendAsync(applyReq);
+        Assert.Equal(HttpStatusCode.Created, applyRes.StatusCode);
+
+        using var postDoc = JsonDocument.Parse(await applyRes.Content.ReadAsStringAsync());
+        var holdId = postDoc.RootElement.GetProperty("holdId").GetGuid();
+        var postExpiresAt = postDoc.RootElement.GetProperty("expiresAt").GetString()!;
+
+        var getHoldRes = await Client.GetAsync($"/holds/{holdId}");
+        Assert.Equal(HttpStatusCode.OK, getHoldRes.StatusCode);
+        using var getHoldDoc = JsonDocument.Parse(await getHoldRes.Content.ReadAsStringAsync());
+        var getHoldExpiresAt = getHoldDoc.RootElement.GetProperty("expiresAt").GetString()!;
+
+        using var myHoldsReq = new HttpRequestMessage(HttpMethod.Get, "/me/holds");
+        myHoldsReq.Headers.Add(StudentHeader.HeaderName, "20152691234567890");
+        var myHoldsRes = await Client.SendAsync(myHoldsReq);
+        Assert.Equal(HttpStatusCode.OK, myHoldsRes.StatusCode);
+        using var myHoldsDoc = JsonDocument.Parse(await myHoldsRes.Content.ReadAsStringAsync());
+        var myHoldsExpiresAt = myHoldsDoc.RootElement[0].GetProperty("expiresAt").GetString()!;
+
+        Assert.Equal(postExpiresAt, getHoldExpiresAt);
+        Assert.Equal(postExpiresAt, myHoldsExpiresAt);
+        Assert.Matches(
+            new Regex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$"),
+            postExpiresAt);
     }
 
     [Fact]

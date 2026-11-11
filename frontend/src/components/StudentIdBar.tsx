@@ -1,4 +1,4 @@
-import { isValidStudentId } from '../api';
+import { isValidStudentId, normalizeStudentId } from '../api';
 
 interface StudentIdBarProps {
   studentId: string;
@@ -38,7 +38,7 @@ export function StudentIdBar({ studentId, onChange }: StudentIdBarProps) {
                 }`}
                 placeholder="যেমন: 20152691234567890"
                 value={studentId}
-                onChange={(e) => onChange(e.target.value.trim())}
+                onChange={(e) => onChange(normalizeStudentId(e.target.value))}
                 aria-describedby="student-id-hint"
               />
               <span className="input-group-text font-monospace">
@@ -63,7 +63,7 @@ export function StudentIdBar({ studentId, onChange }: StudentIdBarProps) {
                 'সঠিক ১৭ অঙ্কের জন্ম নিবন্ধন নম্বর দেওয়া হয়েছে।'}
               {hasInput &&
                 !isValid &&
-                'জন্ম নিবন্ধন নম্বর অবশ্যই ঠিক ১৭ অঙ্কের ইংরেজি সংখ্যা (0-9) হতে হবে।'}
+                'জন্ম নিবন্ধন নম্বর অবশ্যই ঠিক ১৭ অঙ্কের সংখ্যা (0-9) হতে হবে।'}
             </div>
           </div>
         </div>

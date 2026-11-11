@@ -69,26 +69,26 @@ export function ApplicationCard({
   );
 
   useEffect(() => {
-    if (!activeHold) return undefined;
+    if (!activeHold || activeHold.status !== HOLD_STATUS.HELD) {
+      return undefined;
+    }
 
     const timer = window.setInterval(() => {
       const currentNow = Date.now();
       setNowMs(currentNow);
 
-      if (activeHold.status === HOLD_STATUS.HELD) {
-        const rem = computeRemainingMs(
-          activeHold.expiresAt,
-          currentNow,
-          offsetMs,
-        );
-        if (rem <= 0 && expiredNotifiedRef.current !== activeHold.holdId) {
-          expiredNotifiedRef.current = activeHold.holdId;
-          void Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['classes'] }),
-            queryClient.invalidateQueries({ queryKey: ['my-holds'] }),
-            queryClient.invalidateQueries({ queryKey: ['hold'] }),
-          ]);
-        }
+      const rem = computeRemainingMs(
+        activeHold.expiresAt,
+        currentNow,
+        offsetMs,
+      );
+      if (rem <= 0 && expiredNotifiedRef.current !== activeHold.holdId) {
+        expiredNotifiedRef.current = activeHold.holdId;
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['classes'] }),
+          queryClient.invalidateQueries({ queryKey: ['my-holds'] }),
+          queryClient.invalidateQueries({ queryKey: ['hold'] }),
+        ]);
       }
     }, 250);
 

@@ -57,4 +57,25 @@ public sealed class SmokeTests(AdmissionApiFactory factory) : IntegrationTestBas
         var response = await Client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Cors_PreflightAndErrorResponses_IncludeAccessControlAllowOriginHeader()
+    {
+        using var preflight = new HttpRequestMessage(HttpMethod.Options, "/classes");
+        preflight.Headers.Add("Origin", "http://localhost:3000");
+        preflight.Headers.Add("Access-Control-Request-Method", "POST");
+        preflight.Headers.Add("Access-Control-Request-Headers", "content-type,x-student-id,x-custom-header");
+
+        var preflightRes = await Client.SendAsync(preflight);
+        Assert.Equal(HttpStatusCode.NoContent, preflightRes.StatusCode);
+        Assert.True(preflightRes.Headers.TryGetValues("Access-Control-Allow-Origin", out var origins));
+        Assert.Contains("*", origins);
+
+        using var errorReq = new HttpRequestMessage(HttpMethod.Get, "/classes/not-a-guid");
+        errorReq.Headers.Add("Origin", "http://localhost:3000");
+        var errorRes = await Client.SendAsync(errorReq);
+        Assert.Equal(HttpStatusCode.NotFound, errorRes.StatusCode);
+        Assert.True(errorRes.Headers.TryGetValues("Access-Control-Allow-Origin", out var errorOrigins));
+        Assert.Contains("*", errorOrigins);
+    }
 }

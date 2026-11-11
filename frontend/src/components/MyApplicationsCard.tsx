@@ -44,13 +44,15 @@ export function MyApplicationsCard({
     }
   }, [isSuccess, error, onNetworkError]);
 
+  const hasHeldHold = holds.some((h) => h.status === HOLD_STATUS.HELD);
+
   useEffect(() => {
-    if (holds.length === 0) return undefined;
+    if (!hasHeldHold) return undefined;
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
     }, 500);
     return () => window.clearInterval(timer);
-  }, [holds.length]);
+  }, [hasHeldHold]);
 
   return (
     <section className="card shadow-sm h-100">

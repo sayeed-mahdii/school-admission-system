@@ -15,6 +15,12 @@ public sealed class HoldsController(
     TimeProvider timeProvider,
     IOptions<HoldOptions> holdOptions) : ControllerBase
 {
+    private DateTimeOffset UtcNow()
+    {
+        var t = timeProvider.GetUtcNow();
+        return new DateTimeOffset(t.UtcTicks - t.UtcTicks % TimeSpan.TicksPerMillisecond, TimeSpan.Zero);
+    }
+
     [HttpPost("/classes/{classId}/holds")]
     public async Task<IActionResult> Apply(string classId, CancellationToken cancellationToken)
     {
@@ -28,8 +34,6 @@ public sealed class HoldsController(
             return ApiProblem.NotFound("Class not found.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
-
         await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var lockedClasses = await db.Classes
@@ -41,6 +45,8 @@ public sealed class HoldsController(
             await tx.RollbackAsync(cancellationToken);
             return ApiProblem.NotFound("Class not found.");
         }
+
+        var now = UtcNow();
 
         // First inside the lock: flip any expired HELD rows for this class to EXPIRED so a
         // re-applying student never trips the partial unique index on (ClassId, StudentId).
@@ -109,7 +115,7 @@ public sealed class HoldsController(
             return ApiProblem.NotFound("Hold not found.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var now = UtcNow();
 
         var hold = await db.Holds
             .AsNoTracking()
@@ -146,7 +152,7 @@ public sealed class HoldsController(
             return headerError!;
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
+        var now = UtcNow();
 
         var rows = await db.Holds
             .AsNoTracking()
@@ -189,8 +195,6 @@ public sealed class HoldsController(
             return ApiProblem.NotFound("Hold not found.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
-
         // Untracked pre-check so EF Core's identity map does not cache pre-lock state.
         var untrackedHold = await db.Holds
             .AsNoTracking()
@@ -218,6 +222,8 @@ public sealed class HoldsController(
             await tx.RollbackAsync(cancellationToken);
             return ApiProblem.NotFound("Class not found.");
         }
+
+        var now = UtcNow();
 
         // Load tracked entity AFTER acquiring the class row lock so state is fresh from Postgres.
         var hold = await db.Holds.SingleOrDefaultAsync(h => h.Id == parsedHoldId, cancellationToken);
@@ -279,8 +285,6 @@ public sealed class HoldsController(
             return ApiProblem.NotFound("Hold not found.");
         }
 
-        var now = timeProvider.GetUtcNow().ToUniversalTime();
-
         var untrackedHold = await db.Holds
             .AsNoTracking()
             .Where(h => h.Id == parsedHoldId)
@@ -307,6 +311,8 @@ public sealed class HoldsController(
             await tx.RollbackAsync(cancellationToken);
             return ApiProblem.NotFound("Class not found.");
         }
+
+        var now = UtcNow();
 
         var hold = await db.Holds.SingleOrDefaultAsync(h => h.Id == parsedHoldId, cancellationToken);
         if (hold is null)
