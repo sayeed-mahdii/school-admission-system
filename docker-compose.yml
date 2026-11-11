@@ -28,6 +28,21 @@ services:
       db:
         condition: service_healthy
 
+  backend2:
+    build: ./backend
+    profiles: ["scale"]
+    restart: always
+    ports:
+      - "8081:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: ${ConnectionStrings__DefaultConnection:-}
+      DATABASE_CONNECTION_STRING: ${DATABASE_CONNECTION_STRING:-Host=db;Port=5432;Database=admission_system;Username=admin;Password=admin;Maximum Pool Size=30;Timeout=30;GSS Encryption Mode=Disable}
+      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
+    depends_on:
+      db:
+        condition: service_healthy
+
   tests:
     build:
       context: ./backend
