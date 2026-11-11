@@ -1,52 +1,49 @@
-# Architectural Decisions & Assumptions
+# Assumptions
 
-This document records the assumptions and design decisions made where the specification leaves room for interpretation.
+Where the brief does not say, this is what I assumed and why.
 
-## 1. One Active or Confirmed Application Per Student **Per Class**
-- Each shift (e.g., `"Class 6 - Morning Shift"` and `"Class 6 - Day Shift"`) is modeled as a separate class with its own seat capacity (§1.3).
-- A student may hold or confirm **at most one** seat per class at any time (`HELD` with `expiresAt > now`, or `CONFIRMED`), but **may** apply to multiple distinct classes/shifts simultaneously.
-- *Why:* In school admissions, parents frequently apply to both Morning and Day shifts (or multiple sections) for the same child. A stricter global single-application rule across all classes was considered and deliberately not enforced so multi-shift applications remain supported.
-- Enforced both inside the class row-locked transaction (`409 Conflict` with code `DUPLICATE_HOLD`) and at the database level via the partial unique index `UX_Holds_ClassId_StudentId_Active` on `("ClassId", "StudentId") WHERE "Status" IN ('HELD', 'CONFIRMED')`.
+## Applications (holds)
 
-## 2. Concurrency Control & Lazy Expiry (`SELECT … FOR UPDATE` + Derived Counts)
-- **No stored seat counters:** `heldSeats`, `confirmedSeats`, and `availableSeats` are never stored as mutable integer columns on `Classes`. They are derived on the fly from `Holds`:
-  - `heldSeats`: `Status == 'HELD' && ExpiresAt > now`
-  - `confirmedSeats`: `Status == 'CONFIRMED'`
-  - `availableSeats`: `max(0, totalSeats - heldSeats - confirmedSeats)`
-- **Lazy expiry on reads:** Read endpoints (`GET /classes`, `GET /classes/{id}`, `GET /holds/{id}`, `GET /me/holds`) are strictly read-only (`AsNoTracking()`) and compute effective hold status (`Status == 'HELD' && ExpiresAt <= now ? 'EXPIRED' : Status`) using `TimeProvider.GetUtcNow()`. Expired holds immediately stop counting toward `heldSeats` and display as `EXPIRED` with zero database writes or background polling jobs.
-- **Pessimistic row locking on writes:** Every hold write operation (`POST /classes/{id}/holds`, `POST /holds/{id}/confirm`, `DELETE /holds/{id}`) opens an explicit database transaction and locks the parent `Classes` row using `SELECT * FROM "Classes" WHERE "Id" = @classId FOR UPDATE`.
-  - Inside `POST /classes/{id}/holds`, after acquiring the class row lock, the handler **first** executes `UPDATE "Holds" SET "Status" = 'EXPIRED' WHERE "ClassId" = @classId AND "Status" = 'HELD' AND "ExpiresAt" <= @now` (`ExecuteUpdateAsync`) so a student re-applying after expiry never trips the partial unique index, then checks for duplicate active/confirmed holds, counts active `HELD` + `CONFIRMED` holds, and inserts the new hold only if `held + confirmed < totalSeats`.
-  - In `Confirm` and `Cancel`, the pre-check reads the hold with `AsNoTracking()` (to avoid caching stale pre-lock state in EF Core's identity map) and then queries the tracked `Hold` entity **after** acquiring the `FOR UPDATE` lock on `Classes`.
-  - Because the lock lives in PostgreSQL on the shared `Classes` row, `held + confirmed <= totalSeats` holds even when multiple backend instances run on different ports against the same database.
+- **One active application per student per class.** A student cannot hold or confirm two seats in the same class, but can apply to different classes. Morning and Day shift are separate classes, and parents often apply to both. This is enforced inside the locked transaction (`409 DUPLICATE_HOLD`) and, as a safety net, by a partial unique index on `(ClassId, StudentId)` for `HELD`/`CONFIRMED` rows.
+- **Expiry is lazy.** Each hold stores its own `expiresAt`; there is no background job. Anything that reads a hold treats `HELD` with `expiresAt <= now` as `EXPIRED` and stops counting it, so the seat frees at the exact expiry instant with no API call, and it still works after a restart. Writes that touch such a hold also persist `EXPIRED`.
+- **Hold length** comes from `HOLD_DURATION_SECONDS` when the application is made and is stored per hold. Changing it only affects new holds.
+- **Confirm** is idempotent: confirming an already `CONFIRMED` hold returns `200` and changes nothing. Confirming a `CANCELLED` or expired hold returns `409`.
+- **Cancel** works only on a `HELD` hold. Cancelling an already `CANCELLED` hold returns `204`. A `CONFIRMED` hold cannot be cancelled and an expired one cannot be cancelled (`409`); the brief defines no refund flow, so a confirmed admission is final.
+- **Payment is simulated.** "ভর্তি ফি দিন" is treated as a successful payment, as the brief says.
 
-## 3. Idempotent Confirm and Cancel
-- **`POST /holds/{holdId}/confirm`:** Calling confirm on a hold that is already `CONFIRMED` (by the owning student) returns `200 OK` with `{ "holdId": "...", "status": "CONFIRMED" }`. Because `confirmedSeats` is derived from `COUNT(*)` where `Status == 'CONFIRMED'`, repeated confirm calls never increment seat counts more than once.
-- **`DELETE /holds/{holdId}`:** Calling cancel on a hold that is already `CANCELLED` (by the owning student) is idempotent and returns `204 No Content`.
+## Status codes
 
-## 4. State Transition Rules (`409 Conflict` on Invalid Transitions)
-- **Confirm (`POST /holds/{holdId}/confirm`):** Only an active `HELD` hold (`ExpiresAt > now`) can transition to `CONFIRMED`. If the hold is `CANCELLED`, `EXPIRED`, or `HELD` with `ExpiresAt <= now`, the endpoint returns `409 Conflict` (persisting and committing `Status = 'EXPIRED'` first if it was an expired `HELD` row).
-- **Cancel (`DELETE /holds/{holdId}`):** Only an active `HELD` hold (`ExpiresAt > now`) or an already-`CANCELLED` hold returns `204 No Content`. Attempting to cancel a `CONFIRMED` hold or an expired hold (`Status == 'EXPIRED'` or `Status == 'HELD' && ExpiresAt <= now`) returns `409 Conflict` (persisting and committing `Status = 'EXPIRED'` first if needed).
+- Unknown or malformed ids (for example `/holds/not-a-guid`) return `404`.
+- Confirming or cancelling another student's hold returns `403`.
+- A missing, blank or over-long `X-Student-Id` returns `400`.
+- Duplicate application and no free seat both return `409`; the `code` field (`DUPLICATE_HOLD`, `NO_SEATS`) tells them apart.
+- Every error body is JSON with `code` and `message` (RFC 7807 problem details plus those two fields).
 
-## 5. Ownership (`403`) and Unknown or Malformed IDs (`404`)
-- **Ownership:** `POST /holds/{holdId}/confirm` and `DELETE /holds/{holdId}` verify that the hold's `StudentId` matches the `X-Student-Id` header; a mismatch returns `403 Forbidden`.
-- **Route IDs:** All route parameters (`{classId}`, `{holdId}`) are bound as strings and parsed via `Guid.TryParse`. Both non-existent GUIDs and non-GUID strings (e.g., `/classes/not-a-guid`, `/holds/does-not-exist`) consistently return `404 Not Found`.
+## Student identity
 
-## 6. Student Identifier (`X-Student-Id`) Validation
-- **UI:** Enforces a 17-digit birth registration number (`/^\d{17}$/`) and persists it in `localStorage`.
-- **API:** Requires `X-Student-Id` on all four student endpoints (`POST /classes/{id}/holds`, `POST /holds/{id}/confirm`, `DELETE /holds/{id}`, `GET /me/holds`), trims leading/trailing whitespace, and returns `400 Bad Request` if missing or blank. The API accepts any non-empty string (up to 64 characters) rather than restricting to 17 digits so automated grading scripts using arbitrary test IDs work seamlessly.
+- The birth registration number is sent as `X-Student-Id`. The UI requires exactly 17 digits (Bengali digits are converted to 0-9) and remembers it in the browser.
+- The API accepts any non-blank value up to 64 characters, so automated clients can use any test id.
 
-## 7. Class Creation (`POST /classes`) & Non-Unique Class Names
-- `POST /classes` trims `name` and requires a non-empty `name` ($\le 200$ characters) and `totalSeats >= 1`, returning `400 Bad Request` otherwise.
-- Class names are intentionally **not** constrained to be unique so evaluators and automated tests can create classes with the same name repeatedly against a persistent database volume.
-- `GET /classes` orders rows deterministically by `CreatedAt ASC, Id ASC` so table rows never jump between UI polling intervals.
+## Classes
 
-## 8. Application History in `GET /me/holds`
-- `GET /me/holds` returns all holds belonging to the student (`HELD`, `CONFIRMED`, `EXPIRED`, and `CANCELLED`) ordered newest first (`CreatedAt DESC, Id DESC`), computing effective status so expired holds appear as `EXPIRED` immediately.
+- Class names are not unique, so the same name can be created repeatedly. The UI adds a short `#id` tag when two classes share a name.
+- `POST /classes` trims the name and requires 1–200 characters and `totalSeats >= 1`. The UI also caps seats at 100,000 as a client-side safeguard; the API does not.
+- There is no authentication for class creation, as the brief says no login is needed. There is no edit or delete for classes.
+- `GET /classes` lists classes in creation order; `GET /me/holds` lists the student's applications newest first, including expired and cancelled ones.
 
-## 9. No Authentication on Admin Endpoints
-- Per §1.3 of the brief (*"Login লাগবে না"*), `POST /classes` requires no authentication or role header.
+## Response format
 
-## 10. Extra Response Fields (`serverTime`) & Error Format
-- Per §1.4 (*"Response-এ বাড়তি field যোগ করতে পারেন, কিন্তু নিচের কোনো field বাদ দিতে বা তার নাম বদলাতে পারবেন না"*):
-  - Hold responses (`POST /classes/{id}/holds`, `GET /holds/{id}`, `GET /me/holds`) include an additional `serverTime` field (UTC ISO-8601 timestamp with trailing `Z`) alongside `expiresAt` so the React UI can compute a clock-skew-safe countdown timer.
-  - All error responses use RFC 7807 `ProblemDetails` JSON extended with machine-readable `code` and human-readable `message` properties.
+- Every field in the brief is present with the exact name. The only extra field is `serverTime` on hold responses; the UI uses it to compute a countdown that does not depend on the browser's clock.
+- Timestamps are UTC ISO-8601 with a trailing `Z` and millisecond precision, identical across endpoints for the same hold.
+
+## Concurrency
+
+Every request that changes seats (apply, confirm, cancel) runs in one transaction that first locks the class row (`SELECT … FOR UPDATE`). PostgreSQL therefore processes changes for one class one at a time, while different classes do not block each other. Seat counts are never stored: they are computed from the holds table inside that lock, so `held + confirmed <= totalSeats` holds however many requests arrive, and confirm stays idempotent because it only checks stored state.
+
+**Two backend processes on different ports sharing one database** are safe by design: the lock is a PostgreSQL row lock rather than an in-process one, and the backend keeps no seat state in memory, so a second process is subject to the same lock. `MultiInstanceConcurrencyTests` starts two API hosts against one database and sends 100 apply requests to each for a 20-seat class: exactly 20 succeed and 180 get `409`. That test runs two hosts inside one test process, not two containers, but the locking is done by PostgreSQL either way. Each process uses its own injectable clock (`TimeProvider`) rather than SQL `NOW()` so automated tests can deterministically advance time without sleeping, which is fine on one machine; on separate machines, clock skew would shift expiry by the skew.
+
+## UI
+
+- One page with the four sections from the brief and no login. The selected application, and the student number, are restored after a refresh or browser restart.
+- Seat counts and applications refresh every 3 seconds without reloading.
+- API error codes are mapped to plain Bengali/English messages, including "server unreachable" when the backend cannot be reached.
