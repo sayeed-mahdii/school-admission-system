@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { isValidStudentId } from './api';
+import { CreateClassCard } from './components/CreateClassCard';
 import { StudentIdBar } from './components/StudentIdBar';
 
 const STUDENT_ID_STORAGE_KEY = 'admission_student_id';
@@ -71,14 +72,7 @@ function App() {
         <div className="row g-4">
           {/* 1. Class তৈরি (school admin) */}
           <div className="col-12 col-lg-5">
-            <section className="card shadow-sm h-100">
-              <div className="card-header bg-white py-3">
-                <h2 className="h5 mb-0 fw-bold">Class তৈরি (school admin)</h2>
-              </div>
-              <div className="card-body text-muted">
-                নতুন class এবং seat সংখ্যা যোগ করার ফর্ম।
-              </div>
-            </section>
+            <CreateClassCard onNetworkError={setGlobalError} />
           </div>
 
           {/* 2. Class তালিকা */}
